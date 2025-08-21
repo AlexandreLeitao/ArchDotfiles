@@ -1,0 +1,134 @@
+#!/bin/bash
+set -euo pipefail
+
+# === CONFIG (adjust as needed) ===
+DISK="/dev/sda"              # Change to /dev/nvme0n1 if needed
+SWAP_SIZE="4G"               # Swap size
+HOSTNAME="myarch"            # System hostname
+LOCALE="en_US.UTF-8"         # Locale
+TIMEZONE="UTC"               # Timezone
+ROOT_PW="Admin!123"          # Root password
+# ================================
+
+echo ">>> Checking firmware type..."
+if [ -d /sys/firmware/efi ]; then
+    echo "UEFI system detected."
+    MODE="UEFI"
+else
+    echo "BIOS/Legacy system detected."
+    MODE="BIOS"
+fi
+
+# --- Partitioning ---
+if [ "$MODE" == "UEFI" ]; then
+    sfdisk "$DISK" <<EOF
+label: gpt
+label-id: 0x12345678
+device: $DISK
+unit: sectors
+
+${DISK}1 : size=512M, type=uefi
+${DISK}2 : size=$SWAP_SIZE, type=82
+${DISK}3 : type=83
+EOF
+
+    mkfs.fat -F32 "${DISK}1"
+    mkswap "${DISK}2"
+    mkfs.ext4 "${DISK}3"
+
+    mount "${DISK}3" /mnt
+    mkdir /mnt/boot
+    mount "${DISK}1" /mnt/boot
+    swapon "${DISK}2"
+
+else
+    sfdisk "$DISK" <<EOF
+label: dos
+label-id: 0xdeadbeef
+device: $DISK
+unit: sectors
+
+${DISK}1 : size=$SWAP_SIZE, type=82, bootable
+${DISK}2 : type=83
+EOF
+
+    mkswap "${DISK}1"
+    swapon "${DISK}1"
+    mkfs.ext4 "${DISK}2"
+
+    mount "${DISK}2" /mnt
+fi
+
+# --- Install base system ---
+pacstrap /mnt base linux linux-firmware vim git
+
+# --- Generate fstab ---
+genfstab -U /mnt >> /mnt/etc/fstab
+
+# --- Copy post-install script ---
+cat > /mnt/setup-post.sh <<"EOS"
+#!/bin/bash
+set -euo pipefail
+
+DISK="__DISK__"
+HOSTNAME="__HOSTNAME__"
+LOCALE="__LOCALE__"
+TIMEZONE="__TIMEZONE__"
+ROOT_PW="__ROOTPW__"
+MODE="__MODE__"
+
+# Timezone & clock
+ln -sf "/usr/share/zoneinfo/${TIMEZONE}" /etc/localtime
+hwclock --systohc
+
+# Locale
+sed -i "s/^#${LOCALE} UTF-8/${LOCALE} UTF-8/" /etc/locale.gen || echo "${LOCALE} UTF-8" >> /etc/locale.gen
+locale-gen
+echo "LANG=${LOCALE}" > /etc/locale.conf
+
+# Hostname & hosts
+echo "${HOSTNAME}" > /etc/hostname
+cat >/etc/hosts <<EOF
+127.0.0.1   localhost
+::1         localhost
+127.0.1.1   ${HOSTNAME}.localdomain ${HOSTNAME}
+EOF
+
+# Root password
+echo "root:${ROOT_PW}" | chpasswd
+
+# Networking + sudo
+pacman -S --noconfirm --needed networkmanager sudo
+systemctl enable NetworkManager
+
+# Microcode (recommended)
+pacman -S --noconfirm --needed intel-ucode amd-ucode || true
+
+# Bootloader
+if [ "$MODE" == "UEFI" ]; then
+    pacman -S --noconfirm grub efibootmgr
+    grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
+else
+    pacman -S --noconfirm grub
+    grub-install --target=i386-pc "${DISK}"
+fi
+grub-mkconfig -o /boot/grub/grub.cfg
+
+echo ">>> setup-post.sh completed successfully."
+EOS
+
+# Replace placeholders in post script
+sed -i "s|__DISK__|$DISK|" /mnt/setup-post.sh
+sed -i "s|__HOSTNAME__|$HOSTNAME|" /mnt/setup-post.sh
+sed -i "s|__LOCALE__|$LOCALE|" /mnt/setup-post.sh
+sed -i "s|__TIMEZONE__|$TIMEZONE|" /mnt/setup-post.sh
+sed -i "s|__ROOTPW__|$ROOT_PW|" /mnt/setup-post.sh
+sed -i "s|__MODE__|$MODE|" /mnt/setup-post.sh
+
+chmod +x /mnt/setup-post.sh
+
+# --- Chroot and run ---
+arch-chroot /mnt /setup-post.sh
+rm /mnt/setup-post.sh
+
+echo ">>> Base install finished. You can now reboot."
