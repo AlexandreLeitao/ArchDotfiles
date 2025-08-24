@@ -28,9 +28,9 @@ label-id: 0x12345678
 device: $DISK
 unit: sectors
 
-${DISK}1 : size=512M, type=U
-${DISK}2 : size=$SWAP_SIZE, type=82
-${DISK}3 : type=83
+${DISK}1 : size=512, type=EFI System
+${DISK}2 : size=4096, type=Linux swap
+${DISK}3 : type=Linux filesystem
 EOF
 
     mkfs.fat -F32 "${DISK}1"
