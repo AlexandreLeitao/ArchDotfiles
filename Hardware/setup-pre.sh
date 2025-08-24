@@ -2,62 +2,64 @@
 set -euo pipefail
 
 # === CONFIG (adjust as needed) ===
-DISK="/dev/sda"              # Change to /dev/nvme0n1 if needed
-SWAP_SIZE="4096M"               # Swap size
-HOSTNAME="myarch"            # System hostname
-LOCALE="en_US.UTF-8"         # Locale
-TIMEZONE="UTC"               # Timezone
-ROOT_PW="Admin!123"          # Root password
+DISK="/dev/sda"          # e.g. /dev/nvme0n1 on NVMe
+SWAP_MIB="4096"          # Swap size in MiB (numeric only)
+HOSTNAME="myarch"
+LOCALE="en_US.UTF-8"
+TIMEZONE="UTC"
+ROOT_PW="Admin!123"
 # ================================
 
 echo ">>> Checking firmware type..."
 if [ -d /sys/firmware/efi ]; then
-    echo "UEFI system detected."
-    MODE="UEFI"
+  echo "UEFI system detected."
+  MODE="UEFI"
 else
-    echo "BIOS/Legacy system detected."
-    MODE="BIOS"
+  echo "BIOS/Legacy system detected."
+  MODE="BIOS"
 fi
 
-wipefs -a $DISK
+echo ">>> Wiping old signatures on $DISK"
+wipefs -a "$DISK"
+
 # --- Partitioning ---
 if [ "$MODE" == "UEFI" ]; then
-    sfdisk "$DISK" <<EOF
+  echo ">>> Creating GPT layout (ESP + swap + root)"
+  sfdisk "$DISK" <<EOF
 label: gpt
-label-id: 0x12345678
 device: $DISK
-unit: sectors
+unit: MiB
 
-${DISK}1 : size=512, type=EFI System
-${DISK}2 : size=4096, type=Linux swap
-${DISK}3 : type=Linux filesystem
+${DISK}1 : size=512,  type=EFI System
+${DISK}2 : size=${SWAP_MIB}, type=Linux swap
+${DISK}3 :               type=Linux filesystem
 EOF
 
-    mkfs.fat -F32 "${DISK}1"
-    mkswap "${DISK}2"
-    mkfs.ext4 "${DISK}3"
+  mkfs.fat -F32 "${DISK}1"
+  mkswap "${DISK}2"
+  mkfs.ext4 "${DISK}3"
 
-    mount "${DISK}3" /mnt
-    mkdir /mnt/boot
-    mount "${DISK}1" /mnt/boot
-    swapon "${DISK}2"
+  mount "${DISK}3" /mnt
+  mkdir -p /mnt/boot
+  mount "${DISK}1" /mnt/boot
+  swapon "${DISK}2"
 
 else
-    sfdisk "$DISK" <<EOF
+  echo ">>> Creating DOS/MBR layout (swap + root)"
+  sfdisk "$DISK" <<EOF
 label: dos
-label-id: 0xdeadbeef
 device: $DISK
-unit: sectors
+unit: MiB
 
-${DISK}1 : size=$SWAP_SIZE, type=82, bootable
-${DISK}2 : type=83
+${DISK}1 : size=${SWAP_MIB}, type=82
+${DISK}2 :               type=83
 EOF
 
-    mkswap "${DISK}1"
-    swapon "${DISK}1"
-    mkfs.ext4 "${DISK}2"
+  mkswap "${DISK}1"
+  swapon "${DISK}1"
+  mkfs.ext4 "${DISK}2"
 
-    mount "${DISK}2" /mnt
+  mount "${DISK}2" /mnt
 fi
 
 # --- Install base system ---
@@ -102,17 +104,18 @@ echo "root:${ROOT_PW}" | chpasswd
 pacman -S --noconfirm --needed networkmanager sudo
 systemctl enable NetworkManager
 
-# Microcode (recommended)
+# Microcode (recommended; harmless to install both)
 pacman -S --noconfirm --needed intel-ucode amd-ucode || true
 
 # Bootloader
 if [ "$MODE" == "UEFI" ]; then
-    pacman -S --noconfirm grub efibootmgr
-    grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
+  pacman -S --noconfirm grub efibootmgr
+  grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
 else
-    pacman -S --noconfirm grub
-    grub-install --target=i386-pc "${DISK}"
+  pacman -S --noconfirm grub
+  grub-install --target=i386-pc "${DISK}"
 fi
+
 grub-mkconfig -o /boot/grub/grub.cfg
 
 echo ">>> setup-post.sh completed successfully."
