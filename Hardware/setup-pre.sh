@@ -19,7 +19,7 @@ else
   MODE="BIOS"
 fi
 
-echo ">>> Wiping old signatures on $DISK"
+echo ">>> Wiping old signatures on $DISK references..."
 wipefs -a "$DISK"
 
 # --- Partition device suffix logic ---
