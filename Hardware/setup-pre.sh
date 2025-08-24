@@ -27,7 +27,6 @@ if [ "$MODE" == "UEFI" ]; then
   echo ">>> Creating GPT layout (ESP + swap + root)"
   sfdisk "$DISK" <<EOF
 label: gpt
-device: $DISK
 unit: MiB
 
 ${DISK}1 : size=512,  type=EFI System
@@ -48,7 +47,6 @@ else
   echo ">>> Creating DOS/MBR layout (swap + root)"
   sfdisk "$DISK" <<EOF
 label: dos
-device: $DISK
 unit: MiB
 
 ${DISK}1 : size=${SWAP_MIB}, type=82
