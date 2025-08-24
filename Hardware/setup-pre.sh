@@ -27,6 +27,8 @@ if [ "$MODE" == "UEFI" ]; then
   echo ">>> Creating GPT layout (ESP + swap + root)"
   sfdisk "$DISK" <<EOF
 label: gpt
+device: $DISK
+unit: MiB
 
 ${DISK}1 : size=512,  type=EFI System
 ${DISK}2 : size=${SWAP_MIB}, type=Linux swap
@@ -46,6 +48,8 @@ else
   echo ">>> Creating DOS/MBR layout (swap + root)"
   sfdisk "$DISK" <<EOF
 label: dos
+device: $DISK
+unit: MiB
 
 ${DISK}1 : size=${SWAP_MIB}, type=82
 ${DISK}2 :               type=83
@@ -115,20 +119,3 @@ fi
 grub-mkconfig -o /boot/grub/grub.cfg
 
 echo ">>> setup-post.sh completed successfully."
-EOS
-
-# Replace placeholders in post script
-sed -i "s|__DISK__|$DISK|" /mnt/setup-post.sh
-sed -i "s|__HOSTNAME__|$HOSTNAME|" /mnt/setup-post.sh
-sed -i "s|__LOCALE__|$LOCALE|" /mnt/setup-post.sh
-sed -i "s|__TIMEZONE__|$TIMEZONE|" /mnt/setup-post.sh
-sed -i "s|__ROOTPW__|$ROOT_PW|" /mnt/setup-post.sh
-sed -i "s|__MODE__|$MODE|" /mnt/setup-post.sh
-
-chmod +x /mnt/setup-post.sh
-
-# --- Chroot and run ---
-arch-chroot /mnt /setup-post.sh
-rm /mnt/setup-post.sh
-
-echo ">>> Base install finished. You can now reboot."
