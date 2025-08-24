@@ -3,7 +3,7 @@ set -euo pipefail
 
 # === CONFIG (adjust as needed) ===
 DISK="/dev/sda"              # Change to /dev/nvme0n1 if needed
-SWAP_SIZE="4G"               # Swap size
+SWAP_SIZE="4096M"               # Swap size
 HOSTNAME="myarch"            # System hostname
 LOCALE="en_US.UTF-8"         # Locale
 TIMEZONE="UTC"               # Timezone
@@ -19,6 +19,7 @@ else
     MODE="BIOS"
 fi
 
+wipefs -a $DISK
 # --- Partitioning ---
 if [ "$MODE" == "UEFI" ]; then
     sfdisk "$DISK" <<EOF
@@ -27,7 +28,7 @@ label-id: 0x12345678
 device: $DISK
 unit: sectors
 
-${DISK}1 : size=512M, type=uefi
+${DISK}1 : size=512M, type=U
 ${DISK}2 : size=$SWAP_SIZE, type=82
 ${DISK}3 : type=83
 EOF
