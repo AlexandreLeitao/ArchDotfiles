@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # === CONFIG (adjust as needed) ===
-DISK="/dev/sda"          # e.g. /dev/nvme0n1 on NVMe
+DISK="/dev/nvme0n1"      # e.g. /dev/nvme0n1 on NVMe
 SWAP_MIB="4096"          # Swap size in MiB (numeric only)
 HOSTNAME="myarch"
 LOCALE="en_US.UTF-8"
@@ -22,6 +22,17 @@ fi
 echo ">>> Wiping old signatures on $DISK"
 wipefs -a "$DISK"
 
+# --- Partition device suffix logic ---
+if [[ "$DISK" =~ nvme ]]; then
+  PART1="${DISK}p1"
+  PART2="${DISK}p2"
+  PART3="${DISK}p3"
+else
+  PART1="${DISK}1"
+  PART2="${DISK}2"
+  PART3="${DISK}3"
+fi
+
 # --- Partitioning ---
 if [ "$MODE" == "UEFI" ]; then
   echo ">>> Creating GPT layout (ESP + swap + root)"
@@ -30,19 +41,19 @@ label: gpt
 device: $DISK
 unit: MiB
 
-${DISK}1 : size=512,  type=EFI System
-${DISK}2 : size=${SWAP_MIB}, type=Linux swap
-${DISK}3 :               type=Linux filesystem
+${PART1} : size=512,  type=EFI System
+${PART2} : size=${SWAP_MIB}, type=Linux swap
+${PART3} :               type=Linux filesystem
 EOF
 
-  mkfs.fat -F32 "${DISK}1"
-  mkswap "${DISK}2"
-  mkfs.ext4 "${DISK}3"
+  mkfs.fat -F32 "$PART1"
+  mkswap "$PART2"
+  mkfs.ext4 "$PART3"
 
-  mount "${DISK}3" /mnt
+  mount "$PART3" /mnt
   mkdir -p /mnt/boot
-  mount "${DISK}1" /mnt/boot
-  swapon "${DISK}2"
+  mount "$PART1" /mnt/boot
+  swapon "$PART2"
 
 else
   echo ">>> Creating DOS/MBR layout (swap + root)"
@@ -51,15 +62,15 @@ label: dos
 device: $DISK
 unit: MiB
 
-${DISK}1 : size=${SWAP_MIB}, type=82
-${DISK}2 :               type=83
+${PART1} : size=${SWAP_MIB}, type=82
+${PART2} :               type=83
 EOF
 
-  mkswap "${DISK}1"
-  swapon "${DISK}1"
-  mkfs.ext4 "${DISK}2"
+  mkswap "$PART1"
+  swapon "$PART1"
+  mkfs.ext4 "$PART2"
 
-  mount "${DISK}2" /mnt
+  mount "$PART2" /mnt
 fi
 
 # --- Install base system ---
@@ -68,8 +79,8 @@ pacstrap /mnt base linux linux-firmware vim git
 # --- Generate fstab ---
 genfstab -U /mnt >> /mnt/etc/fstab
 
-# --- Copy post-install script ---
-cat > /mnt/setup-post.sh <<"EOS"
+# --- Copy post-install script and substitute variables ---
+cat > /mnt/setup-post.sh <<'EOS'
 #!/bin/bash
 set -euo pipefail
 
@@ -85,7 +96,7 @@ ln -sf "/usr/share/zoneinfo/${TIMEZONE}" /etc/localtime
 hwclock --systohc
 
 # Locale
-sed -i "s/^#${LOCALE} UTF-8/${LOCALE} UTF-8/" /etc/locale.gen || echo "${LOCALE} UTF-8" >> /etc/locale.gen
+sed -i "/^#\s*${LOCALE} UTF-8/s/^#//" /etc/locale.gen || echo "${LOCALE} UTF-8" >> /etc/locale.gen
 locale-gen
 echo "LANG=${LOCALE}" > /etc/locale.conf
 
@@ -119,3 +130,16 @@ fi
 grub-mkconfig -o /boot/grub/grub.cfg
 
 echo ">>> setup-post.sh completed successfully."
+EOS
+
+# Substitute variables in setup-post.sh
+sed -i \
+  -e "s|__DISK__|$DISK|g" \
+  -e "s|__HOSTNAME__|$HOSTNAME|g" \
+  -e "s|__LOCALE__|$LOCALE|g" \
+  -e "s|__TIMEZONE__|$TIMEZONE|g" \
+  -e "s|__ROOTPW__|$ROOT_PW|g" \
+  -e "s|__MODE__|$MODE|g" \
+  /mnt/setup-post.sh
+
+echo ">>> Installation base complete. You can chroot and run /setup-post.sh in the new system."
