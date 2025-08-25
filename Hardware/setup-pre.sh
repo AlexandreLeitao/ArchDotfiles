@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+IFS=$'\n\t'
 
 # === CONFIG (adjust as needed) ===
 DISK="/dev/nvme0n1"      # e.g. /dev/nvme0n1 on NVMe
@@ -35,15 +36,15 @@ fi
 
 # --- Partitioning ---
 if [ "$MODE" == "UEFI" ]; then
-  echo ">>> Creating GPT layout (ESP + swap + root)"
-sfdisk "$DISK" <<EOF
-label: gpt
-unit: MiB
 
-size=512, type=EFI System
-size=${SWAP_MIB}, type=Linux swap
-type=Linux filesystem
+  echo ">>> Creating GPT layout (ESP + swap + root)"
+  set -x
+  sfdisk "$DISK" <<EOF
+,512M,U
+,${SWAP_MIB}M,S
+,,L
 EOF
+  set +x
 
   mkfs.fat -F32 "$PART1"
   mkswap "$PART2"
